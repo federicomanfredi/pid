@@ -1,0 +1,487 @@
+<!doctype html>
+
+<!-- Gioco temperatura forno, v. 0.1                             -->
+<!-- Copyright (c) IIS Cattaneo dall'Aglio, Castelnovo ne' Monti -->
+<!-- (M.C., 04/05/2023)                                          -->
+
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+    <meta name="viewport" content="width=device-width"/>
+    <title>Regolazione temperatura forno per trattamento termico</title> 
+
+    <script>
+	
+      var P            = 0;    /* Potenza scaldante */
+	  var Tenv         = 20;   /* Temperatura ambiente */
+	  //var Tstart       = 0;    /* Temperatura di partenza della simulazione */
+	  var Ttarget      = 50;   /* Temperatura target */
+	  var Ttol         = 0.1;  /* Tolleranza ammessa per la temperatura target */
+	  var Ttime        = 5.0;  /* Tempo (in secondi) per cui è richiesta la temperatura in tolleranza */
+	  var Timer        = 0.0;  /* Timer tempo di riscaldo */
+	  var TimerTot     = 0.0;  /* Timer partita */
+	  var Texplosion   = 50.2; /* Temperatura di esplosione */
+	  var K_R_T1       = 1;    /* Coefficiente di scambio termico resistenza */  
+	  var K_T2_T1      = 0.2;  /* Coefficiente di scambio termico forno vicino parete -> resistenza */  
+	  var K_T1_T2      = 0.02; /* Coefficiente di scambio termico resistenza -> forno vicino parete */  
+	  var K_T2_env     = 0.11; /* Coefficiente di scambio termico forno vicino parete -> ambiente   */  
+	  var K_T3_T2      = 0.1;  /* Coefficiente di scambio termico forno vicino pezzo -> forno vicino parete */  
+	  var K_T2_T3      = 0.16; /* Coefficiente di scambio termico forno vicino parete -> forno vicino pezzo */
+	  var K_T3_part    = 0.08; /* Coefficiente di scambio termico forno vicino pezzo -> pezzo */
+	  var K_part_T3    = 0.1;  /* Coefficiente di scambio termico pezzo -> forno vicino pezzo */
+	  var T1           = Tenv; /* Temperatura superficiale della resistenza */
+	  var T2           = Tenv; /* Temperatura interna al forno, vicino alla parete esterna */
+	  var T3           = Tenv; /* Temperatura interna al forno, vicino al pezzo */ 
+	  var Tpart        = Tenv; /* Temperatura del pezzo */
+      var TpartInitial = 20;   /* Temperatura iniziale pezzo da scaldare */
+	  var PartPresent  = 0;
+	  var GameState    = 0;    /* Stato della partita in corso (0=gioco non avviato; 1=partita in corso; 2=partita finita, vinto; 3=partita finita, perso */
+	
+	  function componentToHex(c){
+	    var hex = c.toString(16);
+		return hex.length == 1 ? "0" + hex : hex;
+	  }
+
+	  function rgbToHex(r, g, b){
+	    return "#" + componentToHex(r) + componentToHex(g) + componentToHex(b);
+	  }
+	  
+	  function linScale(x1, x2, y1, y2, x){
+	    if (x1 != x2){
+		  //return y1+(y2-y1)/(x2-x1)*(x-x1);
+		  return Math.min(Math.max(y1+(y2-y1)/(x2-x1)*(x-x1), Math.min(y1, y2)), Math.max(y1, y2))
+		}
+		else{
+		  return 0;
+		}
+	  }
+      
+	  function passoSim(){
+	    if (GameState == 1){
+	      /* Incremento timer simulazione */
+		  TimerTot = TimerTot + 0.1;
+	      /* Incremento tempertura zona T1 (corpo resistenza) per potenza resistenza scaldante */
+		  T1 = T1 + P * K_R_T1;
+		  /* Variazione tempertura zona T1 (corpo resistenza) per scambio con zona T2 (forno, vicino alla parete esterna) */
+		  T1 = T1 + (T2-T1) * K_T2_T1;
+		  /* Variazione tempertura zona T2 (forno, vicino alla parete esterna) per scambio con T1 (corpo resistenza) */
+		  T2 = T2 + (T1-T2) * K_T1_T2;
+		  /* Variazione tempertura zona T2 (forno, vicino alla parete esterna) per scambio con ambiente */
+		  T2 = T2 + (Tenv-T2) * K_T2_env;
+		  /* Variazione tempertura zona T2 (forno, vicino alla parete esterna) per scambio con T3 (forno, vicino al pezzo) */
+		  T2 = T2 + (T3-T2) * K_T3_T2;
+		  /* Variazione tempertura zona T3 (forno, vicino al pezzo) per scambio con T2 (forno, vicino alla parete esterna) */
+		  T3 = T3 + (T2-T3) * K_T2_T3;
+		  if (PartPresent==1){
+			  /* Variazione tempertura zona T3 (forno, vicino al pezzo) per scambio con pezzo */
+			  T3 = T3 + (Tpart-T3) * K_T3_part;
+			  /* Variazione tempertura pezzo per scambio con zona T3 (forno, vicino al pezzo) */
+			  Tpart = Tpart + (T3-Tpart) * K_part_T3;
+		  }
+
+		  // Verifica temperatura pezzo nel range
+		  var Tround = Math.round(Tpart*10)/10.0;
+		  if ((Tround >= Ttarget-Ttol)&(Tround <= Ttarget+Ttol)){
+			Timer = Timer + 0.1;
+			}
+		  else{
+		    Timer = 0;
+		  }
+
+		  // Verifica tempo di riscaldo raggiunto
+		  if (Timer >= Ttime){
+		    GameState = 2; // Fine patita, VINTO
+			setMessage(2);
+		  }
+		  
+		  // Verifica raggiungimento punto di esplosione
+		  if (Tpart > Texplosion){
+		    GameState = 3; // Fine partita, PERSO 
+    		setPartPresent(0);
+			setBoom(1);
+			setMessage(1);
+		  }
+		}
+
+		  /* Aggiornamento campi */
+		  document.getElementById("id_P").innerHTML = ""+(P/10).toFixed(1);
+		  //document.getElementById("id_T1").innerHTML = ""+T1.toFixed(1);
+		  //document.getElementById("id_T2").innerHTML = ""+T2.toFixed(1);
+		  //document.getElementById("id_T3").innerHTML = ""+T3.toFixed(1);
+		  if (GameState>0){
+			document.getElementById("id_Tpart").innerHTML = ""+Tpart.toFixed(1);
+		  }else{
+			document.getElementById("id_Tpart").innerHTML = ".";
+		  }
+		  document.getElementById("id_TtimeInTol").innerHTML = ""+Timer.toFixed(1);
+		  document.getElementById("id_TotalTimer").innerHTML = ""+TimerTot.toFixed(1);
+		  
+		  /* Aggiornamento colore grafica */
+
+		  // Colore resistenza
+		  // Colore di partenza: #663300 (102, 51, 0) / colore finale: #ffdc54 (255, 220, 84)
+		  var T1_hexCol = rgbToHex(Math.round(linScale(Tenv, Ttarget, 102, 255, T1)), Math.round(linScale(Tenv, Ttarget, 51, 220, T1)), Math.round(linScale(Tenv, Ttarget, 0, 84, T1)))
+		  document.getElementById("ResistenzaScaldante1").setAttribute('style', "fill:none;stroke:"+T1_hexCol+";stroke-width:81;stroke-linejoin:round");
+
+		  // Colore interno forno
+          // Colore di partenza: #dddddd (221, 221, 221) / colore finale: #ff7500 (255, 117, 0)
+		  var T3_hexCol = rgbToHex(Math.round(linScale(Tenv, Ttarget, 221, 255, T3)), Math.round(linScale(Tenv, Ttarget, 221, 117, T3)), Math.round(linScale(Tenv, Ttarget, 221, 0, T3)))
+		  document.getElementById("InternoForno1").setAttribute('style', "fill:"+T3_hexCol+";stroke:none");
+		  
+		  // Colore pezzo da scaldare
+		  // Colore di partenza: #999999 (153, 153, 153) / colore finale: #ff8a00 (255, 138, 0)
+		  var Tpart_hexCol = rgbToHex(Math.round(linScale(Tenv, Ttarget, 153, 255, Tpart)), Math.round(linScale(Tenv, Ttarget, 153, 138, Tpart)), Math.round(linScale(Tenv, Ttarget, 153, 0, Tpart)))
+		  document.getElementById("Pezzo1").setAttribute('style', "fill:"+Tpart_hexCol+";stroke:none");
+		  
+      }
+
+	  function setPartPresent(p){
+	    if (p==0){
+		  PartPresent = 0;
+		  document.getElementById("Pezzo").style.visibility = "hidden";
+		  document.getElementById("Tp_Text").style.visibility = "hidden";
+		  document.getElementById("Tp_Probe").style.visibility = "hidden";
+		}
+		else if (p==1){
+		  PartPresent = 1;
+		  document.getElementById("Pezzo").style.visibility = "visible";
+		  document.getElementById("Tp_Text").style.visibility = "visible";
+		  document.getElementById("Tp_Probe").style.visibility = "visible";
+		}
+	  }
+
+	  function setBoom(b){
+	    if (b==0){
+		  document.getElementById("Boom").style.visibility = "hidden";
+		}
+		else if (b==1){
+		  document.getElementById("Boom").style.visibility = "visible";
+		}
+	  }
+	  
+	  function setMessage(m){ /* 0=Partita da giocare; 1=Perso; 2=Vinto */
+	    if (m==0){
+		  document.getElementById("id_Message").setAttribute('style', "color:blue");
+		  document.getElementById("id_Message").innerHTML = "<b>Gioca la tua partita...</b>";
+		}
+		else if (m==1){
+		  document.getElementById("id_Message").setAttribute('style', "color:red");
+		  document.getElementById("id_Message").innerHTML = "<b>HAI PERSO!</b>";
+		}
+		else if (m==2){
+		  document.getElementById("id_Message").setAttribute('style', "color:green");
+		  document.getElementById("id_Message").innerHTML = "<b>HAI VINTO! (Obiettivo raggiunto in "+TimerTot.toFixed(1)+" s)</b>";
+		}
+	  }
+
+      function cmdMinus(){
+		if (P > 0){
+			P = P-1;
+		}
+      }
+
+      function cmdPlus(){
+		if (P < 1000){
+			P = P+1;
+		}
+      }
+    
+      function cmdPart0(){
+		setPartPresent(0);
+      }
+
+      function cmdNewGame(){
+	    P = 0;
+	    Tpart = Tenv;
+		Timer = 0;
+		TimerTot = 0;
+		setPartPresent(1);
+		setBoom(0);
+		setMessage(0);
+		GameState = 1;
+      }
+      
+	  function init(){
+		document.getElementById("id_Description").innerHTML = "<b>SCOPO DEL GIOCO:</b> portare il pezzo nel forno ad una temperatura di "+Ttarget.toFixed(1)+" °C, e mantenerlo a quella temperatura (con una tolleranza di +/-"+Ttol.toFixed(1)+" °C) per un tempo di "+Ttime.toFixed(1)+" s.";
+	    P = 0;
+		GameState = 0;
+		Timer = 0;
+		TimerTot = 0;
+		setPartPresent(0);
+		setBoom(0);
+		setMessage(0);
+	  }
+	  
+	  
+    </script>
+
+  </head>
+
+  <body onLoad="setInterval(passoSim, 100);init();">
+    <h1> TEMPERATURE REGULATION CHALLENGE </h1>
+	<p>
+	  <svg id="DisegnoForno"
+		   version="1.2"
+		   width="221.31496"
+		   height="150.48425"
+		   viewBox="0 0 6245.9999 4247.0001"
+		   preserveAspectRatio="xMidYMid"
+		   <metadata id="metadata3566">
+		     <rdf:RDF>
+			   <cc:Work rdf:about="">
+			     <dc:format>image/svg+xml</dc:format>
+			     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+			   </cc:Work>
+			 </rdf:RDF>
+		   </metadata>
+		 <defs class="ClipPathGroup" id="defs3379">
+		   <clipPath id="presentation_clip_path" clipPathUnits="userSpaceOnUse">
+		     <rect id="rect3382" x="0" y="0" width="21000" height="29700" />
+		   </clipPath>
+		    <clipPath id="presentation_clip_path_shrink" clipPathUnits="userSpaceOnUse">
+		     <rect id="rect3385" x="21" y="29" width="20958" height="29641" />
+		    </clipPath>
+	     </defs>
+		 <defs id="defs3387">
+		  <font id="EmbeddedFont_1" horiz-adv-x="2048" horiz-origin-x="0" horiz-origin-y="0" vert-origin-x="45" vert-origin-y="90" vert-adv-y="90">
+		    <font-face id="font-face3390" font-family="Liberation Sans embedded" units-per-em="2048" font-weight="normal" font-style="normal" ascent="1852" descent="423" />
+		    <missing-glyph id="missing-glyph3392" horiz-adv-x="2048" d="M 0,0 L 2047,0 2047,2047 0,2047 0,0 Z" />
+		    <glyph id="glyph3394" unicode="p" horiz-adv-x="927" d="M 1053,546 C 1053,169 920,-20 655,-20 488,-20 376,43 319,168 L 314,168 C 317,163 318,106 318,-2 L 318,-425 138,-425 138,861 C 138,972 136,1046 132,1082 L 306,1082 C 307,1079 308,1070 309,1054 310,1037 312,1012 314,978 315,944 316,921 316,908 L 320,908 C 352,975 394,1024 447,1055 500,1086 569,1101 655,1101 788,1101 888,1056 954,967 1020,878 1053,737 1053,546 Z M 864,542 C 864,693 844,800 803,865 762,930 698,962 609,962 538,962 482,947 442,917 401,887 371,840 350,777 329,713 318,630 318,528 318,386 341,281 386,214 431,147 505,113 607,113 696,113 762,146 803,212 844,277 864,387 864,542 Z" />
+		    <glyph id="glyph3396" unicode="f" horiz-adv-x="584" d="M 361,951 L 361,0 181,0 181,951 29,951 29,1082 181,1082 181,1204 C 181,1303 203,1374 246,1417 289,1460 356,1482 445,1482 495,1482 537,1478 572,1470 L 572,1333 C 542,1338 515,1341 492,1341 446,1341 413,1329 392,1306 371,1283 361,1240 361,1179 L 361,1082 572,1082 572,951 361,951 Z" />
+		    <glyph id="glyph3398" unicode="T" horiz-adv-x="1192" d="M 720,1253 L 720,0 530,0 530,1253 46,1253 46,1409 1204,1409 1204,1253 720,1253 Z" />
+		    <glyph id="glyph3400" unicode="P" horiz-adv-x="1086" d="M 1258,985 C 1258,852 1215,746 1128,667 1041,588 922,549 773,549 L 359,549 359,0 168,0 168,1409 761,1409 C 919,1409 1041,1372 1128,1298 1215,1224 1258,1120 1258,985 Z M 1066,983 C 1066,1165 957,1256 738,1256 L 359,1256 359,700 746,700 C 959,700 1066,794 1066,983 Z" />
+		  </font>
+		 </defs>
+		 <defs id="defs3402" class="TextShapeIndex">
+		   <g id="g3404" ooo:slide="id1" ooo:id-list="id3 id4 id5 id6 id7 id8 id9 id10 id11 id12 id13" />
+		 </defs>
+		 <defs id="defs3406" class="EmbeddedBulletChars">
+		   <g id="bullet-char-template-57356" transform="scale(4.8828125e-4,-4.8828125e-4)">
+		     <path id="path3409" d="M 580,1141 1163,571 580,0 -4,571 580,1141 z" inkscape:connector-curvature="0" />
+		   </g>
+		   <g id="bullet-char-template-57354" transform="scale(4.8828125e-4,-4.8828125e-4)">
+		     <path id="path3412" d="m 8,1128 1129,0 L 1137,0 8,0 8,1128 z" inkscape:connector-curvature="0" />
+		   </g>
+		   <g id="bullet-char-template-10146" transform="scale(4.8828125e-4,-4.8828125e-4)">
+		     <path id="path3415" d="M 174,0 602,739 174,1481 1456,739 174,0 z m 1184,739 -1049,607 350,-607 699,0 z" inkscape:connector-curvature="0" />
+		   </g>
+		   <g id="bullet-char-template-10132" transform="scale(4.8828125e-4,-4.8828125e-4)">
+		     <path id="path3418" d="M 2015,739 1276,0 717,0 l 543,543 -1086,0 0,393 1086,0 -543,545 557,0 741,-742 z" inkscape:connector-curvature="0" />
+		   </g>
+		   <g id="bullet-char-template-10007" transform="scale(4.8828125e-4,-4.8828125e-4)">
+		     <path id="path3421" d="m 0,-2 c -7,16 -16,29 -25,39 l 381,530 c -94,256 -141,385 -141,387 0,25 13,38 40,38 9,0 21,-2 34,-5 21,4 42,12 65,25 l 27,-13 111,-251 280,301 64,-25 24,25 c 21,-10 41,-24 62,-43 C 886,937 835,863 770,784 769,783 710,716 594,584 L 774,223 c 0,-27 -21,-55 -63,-84 l 16,-20 C 717,90 699,76 672,76 641,76 570,178 457,381 L 164,-76 c -22,-34 -53,-51 -92,-51 -42,0 -63,17 -64,51 -7,9 -10,24 -10,44 0,9 1,19 2,30 z" inkscape:connector-curvature="0" />
+		   </g>
+		   <g id="bullet-char-template-10004" transform="scale(4.8828125e-4,-4.8828125e-4)">
+		     <path id="path3424" d="M 285,-33 C 182,-33 111,30 74,156 52,228 41,333 41,471 c 0,78 14,145 41,201 34,71 87,106 158,106 53,0 88,-31 106,-94 l 23,-176 c 8,-64 28,-97 59,-98 l 735,706 c 11,11 33,17 66,17 42,0 63,-15 63,-46 l 0,-122 c 0,-36 -10,-64 -30,-84 L 442,47 C 390,-6 338,-33 285,-33 z" inkscape:connector-curvature="0" />
+		   </g>
+		   <g id="bullet-char-template-9679" transform="scale(4.8828125e-4,-4.8828125e-4)">
+		     <path id="path3427" d="M 813,0 C 632,0 489,54 383,161 276,268 223,411 223,592 c 0,181 53,324 160,431 106,107 249,161 430,161 179,0 323,-54 432,-161 108,-107 162,-251 162,-431 0,-180 -54,-324 -162,-431 C 1136,54 992,0 813,0 z" inkscape:connector-curvature="0" />
+		   </g>
+		   <g id="bullet-char-template-8226" transform="scale(4.8828125e-4,-4.8828125e-4)">
+		     <path id="path3430" d="m 346,457 c -73,0 -137,26 -191,78 -54,51 -81,114 -81,188 0,73 27,136 81,188 54,52 118,78 191,78 73,0 134,-26 185,-79 51,-51 77,-114 77,-187 0,-75 -25,-137 -76,-188 -50,-52 -112,-78 -186,-78 z" inkscape:connector-curvature="0" />
+		   </g>
+		   <g id="bullet-char-template-8211" transform="scale(4.8828125e-4,-4.8828125e-4)">
+		     <path id="path3433" d="m -4,459 1139,0 0,147 -1139,0 0,-147 z" inkscape:connector-curvature="0" />
+		   </g>
+		   <g id="bullet-char-template-61548" transform="scale(4.8828125e-4,-4.8828125e-4)">
+		     <path id="path3436" d="m 173,740 c 0,163 58,303 173,419 116,115 255,173 419,173 163,0 302,-58 418,-173 116,-116 174,-256 174,-419 0,-163 -58,-303 -174,-418 C 1067,206 928,148 765,148 601,148 462,206 346,322 231,437 173,577 173,740 z" inkscape:connector-curvature="0" />
+		  </g>
+		 </defs>
+
+	  <!-- Definizioni per il Boom -->
+	  <defs id="defs851">
+	 	 <linearGradient id="linearGradient1621">
+	 	 <stop stop-color="#ca966b" offset="0" id="stop1591" />
+	 	 <stop stop-color="#b79669" offset="0.071429" id="stop1593" />
+	 	 <stop stop-color="#b4946b" offset="0.142857" id="stop1595" />
+	 	 <stop stop-color="#cb9949" offset="0.214286" id="stop1597" />
+	 	 <stop stop-color="#bda150" offset="0.285714" id="stop1599" />
+	 	 <stop stop-color="#cba264" offset="0.357143" id="stop1601" />
+	 	 <stop stop-color="#e1b56b" offset="0.428571" id="stop1603" />
+	 	 <stop stop-color="#cbab5e" offset="0.5" id="stop1605" />
+	 	 <stop stop-color="#d2ae65" offset="0.571429" id="stop1607" />
+	 	 <stop stop-color="#d4994e" offset="0.642857" id="stop1609" />
+	 	 <stop stop-color="#e4a253" offset="0.714286" id="stop1611" />
+	 	 <stop stop-color="#ddb261" offset="0.785714" id="stop1613" />
+	 	 <stop stop-color="#cba97e" offset="0.857143" id="stop1615" />
+	 	 <stop stop-color="#cfa76a" offset="0.928571" id="stop1617" />
+	 	 <stop stop-color="#e39b5a" offset="1" id="stop1619" />
+	 	 </linearGradient>
+	 	 <linearGradient id="linearGradient1655" gradientTransform="translate(-56.268376,-121.51885)" gradientUnits="userSpaceOnUse" y2="37.696777" x2="237.99158" y1="37.696777" x1="84.771339" xlink:href="#linearGradient1621" />
+	 	 <filter id="filter1665" height="1" y="0" width="1" x="0" style="color-interpolation-filters:sRGB">
+	 	 <feTurbulence id="feTurbulence1657" baseFrequency="0.23000000000000001" type="turbulence" seed="0" numOctaves="3" />
+	 	 <feGaussianBlur id="feGaussianBlur1659" result="result91" stdDeviation="0.59999999999999998" />
+	 	 <feDisplacementMap id="feDisplacementMap1661" in2="result91" result="result1" in="SourceGraphic" xChannelSelector="R" yChannelSelector="G" scale="40" />
+	 	 <feComposite id="feComposite1663" operator="atop" in2="SourceGraphic" in="result1" />
+	 	 </filter>
+	  </defs>
+
+      <g id="g3438" transform="translate(-4382,-2173)">
+        <g id="id2"
+          class="Master_Slide">
+          <g id="bg-id2" class="Background" />
+          <g id="bo-id2" class="BackgroundObjects" />
+        </g>
+      </g>
+      <g id="PareteForno" class="com.sun.star.drawing.CustomShape" inkscape:label="#g3451" transform="translate(-4382,-2173)">
+        <g id="id3">
+          <rect style="fill:none;stroke:none" id="rect3454" height="3255" width="4855" y="2173" x="5773" class="BoundingBox" />
+          <path id="path3456" style="fill:#cc9900;stroke:none" inkscape:connector-curvature="0" d="m 8200,5400 -2400,0 0,-3200 4800,0 0,3200 -2400,0 z" />
+          <path id="path3458" style="fill:none;stroke:#996600;stroke-width:53;stroke-linejoin:round" inkscape:connector-curvature="0" d="m 8200,5400 -2400,0 0,-3200 4800,0 0,3200 -2400,0 z" />
+        </g>
+      </g>
+      <g id="InternoForno" class="com.sun.star.drawing.CustomShape" inkscape:label="#g3460" transform="translate(-4382,-2173)">
+        <g id="id4">
+          <rect style="fill:none;stroke:none" id="rect3463" height="2455" width="4055" y="2573" x="6173" class="BoundingBox" />
+          <path id="InternoForno1" style="fill:#dddddd;stroke:none" inkscape:connector-curvature="0" d="m 8200,5000 -2000,0 0,-2400 4000,0 0,2400 -2000,0 z" />
+          <path id="InternoForno2" style="fill:none;stroke:#996600;stroke-width:53;stroke-linejoin:round" inkscape:connector-curvature="0" d="m 8200,5000 -2000,0 0,-2400 4000,0 0,2400 -2000,0 z" />
+        </g>
+      </g>
+      <g id="Pezzo" visibility="hidden" class="com.sun.star.drawing.CustomShape" inkscape:label="#g3469" transform="translate(-4382,-2173)">
+        <g id="id5">
+          <rect style="fill:none;stroke:none" id="rect3472" height="855" width="1655" y="3373" x="7373" class="BoundingBox" />
+          <path id="Pezzo1" style="fill:#999999;stroke:none" inkscape:connector-curvature="0" d="m 8200,4200 -800,0 0,-800 1600,0 0,800 -800,0 z" />
+          <path id="Pezzo2" style="fill:none;stroke:#333333;stroke-width:53;stroke-linejoin:round" inkscape:connector-curvature="0" d="m 8200,4200 -800,0 0,-800 1600,0 0,800 -800,0 z" />
+        </g>
+      </g>
+      <g id="ResistenzaScaldante" class="com.sun.star.drawing.PolyLineShape" inkscape:label="#g3478" transform="translate(-4382,-2173)">
+        <g id="id6">
+          <rect style="fill:none;stroke:none" id="rect3481" height="1283" width="1583" y="3159" x="5359" class="BoundingBox" />
+          <path id="ResistenzaScaldante1" style="fill:none;stroke:#663300;stroke-width:81;stroke-linejoin:round" inkscape:connector-curvature="0" d="m 5400,3200 1100,0 400,200 -400,200 400,200 -400,200 400,200 -400,200 -1100,0" />
+        </g>
+      </g>
+      <g id="g3485" class="com.sun.star.drawing.CustomShape" transform="translate(-4382,-2173)">
+        <g id="id7">
+          <rect id="rect3488" style="fill:none;stroke:none" height="1637" width="1037" y="2982" x="4382" class="BoundingBox" />
+          <path id="path3490" style="fill:#ffffff;stroke:none" inkscape:connector-curvature="0" d="m 4900,4600 -500,0 0,-1600 1000,0 0,1600 -500,0 z" />
+          <path id="path3492" style="fill:none;stroke:#000000;stroke-width:35;stroke-linejoin:round" inkscape:connector-curvature="0" d="m 4900,4600 -500,0 0,-1600 1000,0 0,1600 -500,0 z" />
+          <text id="text3494" class="SVGTextShape">
+            <tspan id="tspan3496" style="font-size:635px;font-weight:400;font-family:'Liberation Sans, sans-serif'" font-weight="400" font-size="635px" class="TextParagraph">
+              <tspan id="tspan3498" y="4020" x="4688" class="TextPosition">
+                <tspan id="tspan3500" style="fill:#000000;stroke:none">P</tspan>
+              </tspan>
+            </tspan>
+          </text>
+        </g>
+      </g>
+	  <g id="Tf_Probe" visibility="hidden">
+        <g id="g3502" class="com.sun.star.drawing.CustomShape" transform="translate(-4382,-2173)">
+          <g id="id8">
+            <rect id="rect3505" style="fill:none;stroke:none" height="838" width="838" y="5582" x="7282" class="BoundingBox" />
+            <path id="path3507" style="fill:#ffffff;stroke:none" inkscape:connector-curvature="0" d="m 8101,6001 c 0,70 -19,139 -54,200 -35,61 -85,111 -146,146 -61,35 -130,54 -200,54 -71,0 -140,-19 -201,-54 -61,-35 -111,-85 -146,-146 -35,-61 -54,-130 -54,-200 0,-71 19,-140 54,-201 35,-61 85,-111 146,-146 61,-35 130,-54 201,-54 70,0 139,19 200,54 61,35 111,85 146,146 35,61 54,130 54,201 l 0,0 z" />
+            <path id="path3509" style="fill:none;stroke:#000000;stroke-width:35;stroke-linejoin:round" inkscape:connector-curvature="0" d="m 8101,6001 c 0,70 -19,139 -54,200 -35,61 -85,111 -146,146 -61,35 -130,54 -200,54 -71,0 -140,-19 -201,-54 -61,-35 -111,-85 -146,-146 -35,-61 -54,-130 -54,-200 0,-71 19,-140 54,-201 35,-61 85,-111 146,-146 61,-35 130,-54 201,-54 70,0 139,19 200,54 61,35 111,85 146,146 35,61 54,130 54,201 z" />
+          </g>
+        </g>
+        <g id="g3511" class="com.sun.star.drawing.LineShape" transform="translate(-4382,-2173)">
+          <g id="id9">
+            <rect id="rect3514" style="fill:none;stroke:none" height="1168" width="281" y="4460" x="7560" class="BoundingBox" />
+            <path id="path3516" style="fill:none;stroke:#111111;stroke-width:53;stroke-linejoin:round" inkscape:connector-curvature="0" d="m 7700,5600 0,-879" />
+            <path id="path3518" style="fill:#111111;stroke:none" inkscape:connector-curvature="0" d="m 7674,4736 -25,-7 -25,-12 -23,-18 -18,-23 -12,-25 -7,-25 -3,-26 3,-26 7,-26 12,-25 18,-22 23,-18 25,-12 25,-8 27,-2 25,2 26,8 24,12 23,18 18,22 12,25 7,26 4,26 -4,26 -7,25 -12,25 -18,23 -23,18 -24,12 -26,7 -25,4 -27,-4 z" />
+          </g>
+        </g>
+	  </g>
+	  <g id="Tp_Probe">
+        <g id="g3520" class="com.sun.star.drawing.CustomShape" transform="translate(-4382,-2173)">
+          <g id="id10">
+            <rect id="rect3523" style="fill:none;stroke:none" height="838" width="838" y="5582" x="8282" class="BoundingBox" />
+            <path id="path3525" style="fill:#ffffff;stroke:none" inkscape:connector-curvature="0" d="m 9101,6001 c 0,70 -19,139 -54,200 -35,61 -85,111 -146,146 -61,35 -130,54 -200,54 -71,0 -140,-19 -201,-54 -61,-35 -111,-85 -146,-146 -35,-61 -54,-130 -54,-200 0,-71 19,-140 54,-201 35,-61 85,-111 146,-146 61,-35 130,-54 201,-54 70,0 139,19 200,54 61,35 111,85 146,146 35,61 54,130 54,201 l 0,0 z" />
+            <path id="path3527" style="fill:none;stroke:#000000;stroke-width:35;stroke-linejoin:round" inkscape:connector-curvature="0" d="m 9101,6001 c 0,70 -19,139 -54,200 -35,61 -85,111 -146,146 -61,35 -130,54 -200,54 -71,0 -140,-19 -201,-54 -61,-35 -111,-85 -146,-146 -35,-61 -54,-130 -54,-200 0,-71 19,-140 54,-201 35,-61 85,-111 146,-146 61,-35 130,-54 201,-54 70,0 139,19 200,54 61,35 111,85 146,146 35,61 54,130 54,201 z" />
+          </g>
+        </g>
+        <g id="g3529" class="com.sun.star.drawing.LineShape" transform="translate(-4382,-2173)">
+          <g id="id11">
+            <rect id="rect3532" style="fill:none;stroke:none" height="1968" width="281" y="3660" x="8560" class="BoundingBox" />
+            <path id="path3534" style="fill:none;stroke:#111111;stroke-width:53;stroke-linejoin:round" inkscape:connector-curvature="0" d="m 8700,5600 0,-1679" />
+            <path id="path3536" style="fill:#111111;stroke:none" inkscape:connector-curvature="0" d="m 8674,3936 -25,-7 -25,-12 -23,-18 -18,-23 -12,-25 -7,-25 -3,-26 3,-26 7,-26 12,-25 18,-22 23,-18 25,-12 25,-8 27,-2 25,2 26,8 24,12 23,18 18,22 12,25 7,26 4,26 -4,26 -7,25 -12,25 -18,23 -23,18 -24,12 -26,7 -25,4 -27,-4 z" />
+          </g>
+        </g>
+	  </g>
+      <g id="Tf_Text" visibility="hidden" class="TextShape" transform="translate(-4387.3897,-2173)">
+        <g id="id12">
+          <rect id="rect3541" style="fill:none;stroke:none" height="476" width="380" y="5763" x="7511" class="BoundingBox" />
+          <text id="text3543" class="SVGTextShape">
+            <tspan id="tspan3545" style="font-size:423px;font-weight:400;font-family:'Liberation Sans, sans-serif'" font-weight="400" font-size="423px" class="TextParagraph">
+              <tspan id="tspan3547" y="6148" x="7511" class="TextPosition">
+      	      <tspan id="tspan3549" style="fill:#000000;stroke:none">Tf</tspan>
+      	    </tspan>
+            </tspan>
+          </text>
+        </g>
+      </g>
+      <g id="Tp_Text" class="TextShape" transform="translate(-4382,-2173)">
+        <g id="id13">
+          <rect id="rect3554" style="fill:none;stroke:none" height="476" width="498" y="5763" x="8452" class="BoundingBox" />
+          <text id="text3556" class="SVGTextShape"> 
+            <tspan id="tspan3558" style="font-size:423px;font-weight:400;font-family:'Liberation Sans, sans-serif'" font-weight="400" font-size="423px" class="TextParagraph">
+      	    <tspan id="tspan3560" y="6148" x="8452" class="TextPosition">
+      	      <tspan id="tspan3562" style="fill:#000000;stroke:none">Tp</tspan>
+      	    </tspan>
+      	  </tspan>
+          </text>
+        </g>
+      </g>
+			  
+      <g id="Boom" visibility="hidden" transform="scale(19 19) translate(95 -62)" >
+        <g id="g3955">
+          <g id="g1499" transform="matrix(1,0,0,0.86964981,14.184351,58.825351)" style="stroke-width:1.07232845">
+            <path id="path2994" d="m 216.76466,127.02357 c -0.0564,0.17417 -44.76417,10.23215 -44.87755,10.38921 -0.11339,0.15707 22.2784,26.18534 22.11572,26.31459 -0.1626,0.12925 -50.57003,-12.10341 -50.77082,-12.01079 -0.20078,0.0926 -16.26365,31.47696 -16.48891,31.52665 -0.22526,0.0497 -33.957818,-9.23608 -34.192198,-9.23272 -0.23439,0.003 -32.738977,25.56339 -32.966511,25.52021 -0.227533,-0.0432 -13.366498,-34.26733 -13.571675,-34.35413 -0.205177,-0.0868 -48.1217327,11.52312 -48.2905734,11.39862 -0.1688382,-0.12449 13.8783004,-36.70797 13.7573084,-36.86168 -0.120995,-0.15371 -32.489888,-7.00704 -32.554792,-7.17947 -0.06491,-0.17244 19.2839854,-27.9105 19.2795955,-28.08992 -0.0044,-0.17942 -33.3940525,-11.653241 -33.3376315,-11.827421 0.05642,-0.17417 44.7641977,-23.64084 44.8775877,-23.7979 0.113384,-0.15707 12.5367943,-39.594035 12.6994233,-39.723282 0.16263,-0.129247 20.362773,13.380432 20.56356,13.287809 0.200783,-0.09262 23.431477,-34.669511 23.656736,-34.719193 0.225262,-0.04969 20.13415,42.438549 20.368534,42.435185 0.234384,-0.0031 34.786926,-43.441645 35.014456,-43.398454 0.22753,0.0432 13.3665,34.267325 13.57168,34.35412 0.20517,0.0868 34.29806,-8.330561 34.46689,-8.206072 0.16884,0.124493 -0.0546,33.515437 0.0664,33.669137 0.12099,0.1537 45.28959,8.92256 45.35447,9.09501 0.0649,0.17243 -32.08367,25.994961 -32.07928,26.174381 0.004,0.17943 33.39406,25.06193 33.3376,25.23611 z" style="fill:#f30000;stroke:none;stroke-width:0.27381814" />
+            <path id="path2989" d="m 201.18433,101.14411 c -0.0443,-0.1334 -51.34606,-18.287751 -51.43503,-18.408051 -0.089,-0.12029 34.42092,-30.506206 34.29332,-30.605196 -0.12764,-0.099 -56.62302,19.720946 -56.78058,19.650006 -0.15757,-0.071 -12.763,-24.108026 -12.93978,-24.14608 -0.17677,-0.03803 -26.648611,7.073863 -26.832542,7.071281 C 87.305786,54.70377 61.79761,35.127219 61.61905,35.160297 61.440491,35.193387 51.129609,61.405442 50.968596,61.471923 50.807581,61.538393 -1.2104156,42.195428 -1.3429126,42.290778 c -0.132499,0.09535 25.3062646,38.565431 25.2113096,38.683151 -0.09495,0.11772 -32.869263,-4.40254 -32.9201966,-4.27046 -0.050936,0.13206 22.5058506,31.145661 22.5024076,31.283091 -0.0036,0.13741 -15.6080385,8.92514 -15.5637587,9.05854 0.044275,0.1334 24.5308297,18.10638 24.6198087,18.22668 0.08898,0.12029 1.549601,43.65887 1.677222,43.75787 0.127628,0.099 24.268541,-23.58204 24.426111,-23.5111 0.157566,0.0709 28.986147,26.55318 29.162919,26.59123 0.176776,0.038 5.202252,-32.50344 5.386186,-32.50087 12.932426,8.38568 25.067224,22.84207 37.667474,31.06266 0.16101,-0.0665 14.01352,-29.82315 14.14601,-29.91849 0.1325,-0.0953 25.30054,27.77394 25.39549,27.65622 0.095,-0.11772 -10.99842,-50.50777 -10.94748,-50.63983 0.0509,-0.13207 9.38131,-17.61076 9.38476,-17.74819 0.004,-0.13742 42.42326,-8.74377 42.37898,-8.87717 z" style="fill:#f37100;stroke:none;stroke-width:0.27381814" />
+            <path id="path2992" d="m 60.442051,146.64711 c -0.123852,-0.0481 -20.649063,9.45325 -20.750981,9.38426 -0.101924,-0.069 9.544422,-21.45813 9.471388,-21.54332 -0.07304,-0.0852 -33.110624,2.10842 -33.149806,2.01284 -0.03917,-0.0956 15.572056,-23.41863 15.569401,-23.51808 -0.0026,-0.0995 -30.96999734,-12.09006 -30.93593534,-12.18661 0.03407,-0.0965 37.83368634,-7.473631 37.90213534,-7.560691 0.06844,-0.0871 -9.086822,-20.41923 -8.988654,-20.49087 0.09817,-0.0717 28.946936,5.88889 29.068138,5.83756 0.121212,-0.0513 5.525567,-13.78626 5.66155,-13.8138 0.135973,-0.0276 22.009472,8.18267 22.150963,8.18081 0.141488,-0.002 39.8217,-22.098269 39.95903,-22.074331 0.13737,0.02396 -11.98973,26.922901 -11.86586,26.971011 0.12384,0.0481 31.22281,5.31968 31.32471,5.38868 0.10194,0.069 -10.55145,8.64042 -10.47841,8.72562 0.0731,0.0852 27.33946,9.942551 27.37865,10.038141 0.0392,0.0956 -33.46591,8.54341 -33.46328,8.64286 0.003,0.0995 34.25693,14.76095 34.22286,14.8575 -0.0341,0.0966 -27.02228,5.67173 -27.09074,5.7588 -0.0684,0.0871 6.56928,14.5535 6.4711,14.62515 -0.0982,0.0716 -26.42937,-0.0232 -26.55058,0.0281 -0.12121,0.0513 -7.03608,19.21748 -7.17209,19.245 -0.13597,0.0275 -20.498913,-13.61387 -20.640401,-13.61201 -0.141489,0.002 -21.925451,23.90015 -22.062803,23.87627 -0.137351,-0.0239 -5.906522,-28.72478 -6.030385,-28.77289 z" style="fill:#f3f300;stroke:none;stroke-width:0.27381814" />
+          </g>
+          <g id="g1669" transform="translate(-0.113084,234.43876)">
+            <path id="path5" style="fill:url(#linearGradient1655);fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:4.45962286;filter:url(#filter1665)" d="m 82.494614,-116.55822 c -4.60339,0.6615 -9.20866,3.73343 -12.82374,9.00725 -4.35563,6.05432 -6.58946,14.785746 -6.31914,23.155451 0.0559,1.73123 0.15971,3.457598 0.33292,5.185237 1.0092,10.1244 6.26495,19.750413 12.6552,24.261944 7.2187,5.210218 15.57273,4.374048 20.917325,-4.418379 4.043841,-6.951178 5.702441,-17.741475 5.022201,-28.201538 -0.84511,-12.965715 -6.101781,-24.255685 -12.732776,-27.776695 -2.25998,-1.1089 -4.65668,-1.51242 -7.05199,-1.21327 0,0 0,0 0,0 m 39.195026,-0.64595 c -4.27904,-0.30896 -8.54905,1.99686 -11.88178,7.12625 -3.99723,6.19901 -6.00174,16.209662 -5.69802,26.151448 0.0628,2.053973 0.16923,4.09962 0.33903,6.140737 0.98599,11.871781 5.81855,22.081612 11.64616,25.705711 6.58422,3.84257 14.2201,1.052122 19.14949,-8.459975 3.75352,-7.062058 5.33503,-17.063352 4.75157,-26.543553 -0.72774,-11.836638 -5.57915,-22.938668 -11.74573,-27.482678 -2.10213,-1.53933 -4.33227,-2.43687 -6.56072,-2.63794 0,0 0,0 0,0 m -77.873826,10.26268 c -5.053847,1.63795 -10.158641,3.53525 -15.312852,5.47228 0,11.152922 0,22.305847 0,33.458774 7.48875,2.74761 14.848912,5.361737 22.073222,7.488865 3.94786,1.059341 7.99202,-0.02103 10.24428,-3.981103 2.28902,-4.27799 2.15043,-11.300846 -0.38101,-16.113073 -1.32509,-2.435837 -3.20683,-4.047119 -5.23241,-4.91788 1.12364,-0.539506 2.1744,-1.398353 2.96148,-2.644769 2.7367,-4.214421 2.74296,-11.064094 0.60158,-15.516214 -2.12678,-4.21991 -6.1272,-5.63376 -9.94872,-4.68314 -1.66305,0.44023 -3.33178,0.9225 -5.00557,1.43618 0,2e-5 0,5e-5 0,8e-5 m 101.790406,-5.41981 c -1.4835,18.850564 -2.95147,38.196747 -4.40469,58.005324 3.5301,-0.741922 7.03597,-1.561381 10.51849,-2.457672 0.3712,-7.281435 0.74441,-14.500958 1.1197,-21.657649 0.10568,-2.385844 0.21161,-4.765445 0.31773,-7.138773 1.78298,9.280837 3.54903,18.228784 5.29805,26.827743 2.24317,-0.725047 4.47773,-1.482016 6.70397,-2.270708 1.55278,-8.620613 3.11414,-16.854439 4.68424,-24.68655 0.62337,7.541877 1.2417,14.932396 1.85495,22.169692 3.3574,-1.408654 6.69861,-2.889071 10.02455,-4.440543 -1.63008,-10.853783 -3.28807,-22.636651 -4.97423,-35.321054 -3.62883,-1.28904 -7.27648,-2.5242 -10.94365,-3.7035 -1.41854,7.037313 -2.83015,14.393578 -4.23493,22.057783 -1.54096,-7.934691 -3.09542,-16.155833 -4.66329,-24.652163 -3.74416,-0.97595 -7.51091,-1.88725 -11.30088,-2.73193 M 44.096344,-96.35062 c 0.68191,-0.122627 1.35555,-0.186068 1.9961,0.0043 1.35369,0.423202 1.94399,2.28956 1.54266,3.977258 -0.40537,1.681689 -1.85701,2.41169 -3.15259,2.466774 -0.78796,0.05342 -1.57725,0.10772 -2.367857,0.162907 -0.02198,-2.083313 -0.04394,-4.166625 -0.06592,-6.249938 0.673297,-0.056 1.364717,-0.2374 2.047607,-0.361293 0,5e-6 0,9e-6 0,1.5e-5 m 38.97183,-0.188431 c 0.18406,-0.01139 0.36986,-0.0083 0.55649,0.0099 3.74105,0.384686 6.11918,7.128996 5.96536,13.394333 -0.14594,5.92035 -2.4626,11.867831 -6.02897,11.40523 -0.74609,-0.09912 -1.49835,-0.288892 -2.21312,-0.758018 -3.78306,-2.440919 -5.16652,-10.22217 -4.20586,-16.102598 0.72152,-4.479424 3.15679,-7.774015 5.9261,-7.94891 0,2.7e-5 0,5.5e-5 0,8.1e-5 m 39.152726,-0.0053 c 0.1702,0.0023 0.34202,0.01947 0.51462,0.05224 3.4613,0.659863 5.65149,7.469007 5.49929,13.655988 -0.14358,5.866842 -2.28226,11.98318 -5.55841,11.844817 -0.68486,-0.03309 -1.3754,-0.160633 -2.03152,-0.585584 -3.4729,-2.275251 -4.75869,-10.592235 -3.88654,-16.921269 0.65763,-4.76001 2.90279,-8.0775 5.46256,-8.046279 0,2.8e-5 0,5.6e-5 0,8.5e-5 m -80.009826,15.946163 c 1.64119,0.203273 3.31014,0.04319 4.91745,0.603105 1.45236,0.522209 2.29852,2.336626 2.24996,4.109351 -0.0604,2.194037 -1.74506,3.402969 -3.44597,3.077426 -1.21197,-0.2344 -2.42718,-0.414938 -3.6459,-0.627789 -0.0252,-2.387365 -0.0504,-4.774729 -0.0755,-7.162093" />
+            <path id="path1647" d="m 82.474795,-116.5565 c -4.60339,0.66149 -9.20866,3.73343 -12.82374,9.00725 -4.35563,6.05432 -6.58946,14.785747 -6.31914,23.155452 0.0559,1.73123 0.15971,3.457598 0.33292,5.185237 1.0092,10.1244 6.26495,19.750413 12.6552,24.261944 7.2187,5.210218 15.57273,4.374048 20.91733,-4.418379 4.043845,-6.951178 5.702445,-17.741475 5.022205,-28.201538 -0.84511,-12.965716 -6.101785,-24.255686 -12.732785,-27.776696 -2.25998,-1.1089 -4.65668,-1.51243 -7.05199,-1.21327 0,0 0,0 0,0 m 39.195035,-0.64596 c -4.27904,-0.30896 -8.54905,1.99687 -11.88178,7.12626 -3.99723,6.19901 -6.00174,16.209663 -5.69802,26.151449 0.0628,2.053973 0.16923,4.09962 0.33903,6.140737 0.98599,11.871781 5.81854,22.081612 11.64616,25.705711 6.58421,3.84257 14.2201,1.052122 19.14949,-8.459975 3.75352,-7.062058 5.33503,-17.063352 4.75157,-26.543553 -0.72774,-11.836638 -5.57915,-22.938669 -11.74573,-27.482689 -2.10213,-1.53933 -4.33227,-2.43686 -6.56072,-2.63794 0,0 0,0 0,0 m -77.873835,10.26269 c -5.05385,1.63795 -10.15864,3.53525 -15.312852,5.47228 0,11.152923 0,22.305848 0,33.458775 7.488752,2.74761 14.848912,5.361737 22.073222,7.488865 3.94786,1.059341 7.99202,-0.02103 10.24428,-3.981103 2.28902,-4.27799 2.15043,-11.300846 -0.38101,-16.113073 -1.32509,-2.435837 -3.20683,-4.047119 -5.23241,-4.91788 1.12364,-0.539506 2.1744,-1.398353 2.96148,-2.644769 2.7367,-4.214421 2.74296,-11.064094 0.60158,-15.516215 -2.12678,-4.21992 -6.1272,-5.63376 -9.94872,-4.68314 -1.66305,0.44023 -3.33178,0.9225 -5.00557,1.43617 0,3e-5 0,6e-5 0,9e-5 m 101.790415,-5.41981 c -1.4835,18.850565 -2.95147,38.196748 -4.40469,58.005325 3.5301,-0.741922 7.03597,-1.561381 10.51849,-2.457672 0.37119,-7.281435 0.74441,-14.500958 1.1197,-21.657649 0.10568,-2.385844 0.21161,-4.765445 0.31773,-7.138773 1.78297,9.280837 3.54903,18.228784 5.29805,26.827743 2.24317,-0.725047 4.47773,-1.482016 6.70397,-2.270708 1.55278,-8.620613 3.11414,-16.854439 4.68423,-24.68655 0.62338,7.541877 1.2417,14.932396 1.85495,22.169692 3.3574,-1.408654 6.69861,-2.889071 10.02455,-4.440543 -1.63008,-10.853783 -3.28807,-22.636651 -4.97423,-35.321055 -3.62883,-1.28905 -7.27648,-2.5242 -10.94365,-3.70351 -1.41854,7.037321 -2.83015,14.393589 -4.23493,22.057794 -1.54096,-7.934691 -3.09542,-16.155834 -4.66329,-24.652164 -3.74416,-0.97596 -7.51091,-1.88725 -11.30088,-2.73193 M 44.076525,-96.348899 c 0.68191,-0.122627 1.35555,-0.186068 1.9961,0.0043 1.35369,0.423202 1.94399,2.28956 1.54266,3.977258 -0.40537,1.681689 -1.85701,2.41169 -3.15259,2.466774 -0.78796,0.05342 -1.57725,0.10772 -2.36786,0.162907 -0.022,-2.083313 -0.0439,-4.166625 -0.0659,-6.249938 0.6733,-0.056 1.36472,-0.2374 2.04761,-0.361293 0,5e-6 0,9e-6 0,1.5e-5 m 38.97183,-0.188431 c 0.18406,-0.01139 0.36986,-0.0083 0.55649,0.0099 3.74105,0.384686 6.11918,7.128996 5.96536,13.394333 -0.14594,5.92035 -2.4626,11.867831 -6.02897,11.40523 -0.74609,-0.09912 -1.49835,-0.288892 -2.21312,-0.758018 -3.78306,-2.440919 -5.16652,-10.22217 -4.20586,-16.102598 0.72152,-4.479424 3.15679,-7.774015 5.9261,-7.94891 0,2.7e-5 0,5.5e-5 0,8.1e-5 m 39.152735,-0.0053 c 0.1702,0.0023 0.34202,0.01947 0.51462,0.05224 3.4613,0.659863 5.65149,7.469007 5.49929,13.655988 -0.14358,5.866842 -2.28226,11.98318 -5.55841,11.844817 -0.68486,-0.03309 -1.3754,-0.160633 -2.03152,-0.585584 -3.4729,-2.275251 -4.75869,-10.592235 -3.88654,-16.921269 0.65763,-4.76001 2.90279,-8.0775 5.46256,-8.046279 0,2.8e-5 0,5.6e-5 0,8.5e-5 m -80.009855,15.946163 c 1.64119,0.203273 3.31014,0.04319 4.91745,0.603105 1.45236,0.522209 2.29852,2.336626 2.24996,4.109351 -0.0604,2.194037 -1.74506,3.402969 -3.44597,3.077426 -1.21197,-0.2344 -2.42718,-0.414938 -3.6459,-0.627789 -0.0252,-2.387365 -0.0504,-4.774729 -0.0755,-7.162093" style="fill:none;fill-opacity:1;fill-rule:evenodd;stroke:#410000;stroke-width:0.79374999" />
+          </g>
+        </g>
+      </g>
+	  
+	</svg>
+	<p>
+	
+    <p style="text-align:left">
+      <div id="id_Message">
+		<b> Gioca la tua partita... </b>
+      </div>	
+	</p>
+    <p style="text-align:left">
+      <div>
+		Potenza: <span id="id_P">.</span> kW
+      </div>
+	  <!--
+      <div>		
+		Temperatura T1: <span id="id_T1">.</span> °C
+      </div>
+      <div>		
+		Temperatura T2: <span id="id_T2">.</span> °C
+      </div>
+      <div>		
+		Temperatura T3: <span id="id_T3">.</span> °C
+      </div>
+	  -->
+      <div>		
+		Temperatura pezzo (Tp): <span id="id_Tpart">.</span> °C
+      </div>
+      <div>		
+		Permanenza temperatura in tolleranza: <span id="id_TtimeInTol">.</span> s
+      </div>
+      <div>		
+		Durata partita: <span id="id_TotalTimer">.</span> s
+      </div>
+    </p>
+
+	<p>
+	  <button id="butMinus" style="font-size:170%;height:70px;width:150px" onclick="cmdMinus()"> P - </button>
+	  <button id="butPlus"  style="font-size:170%;height:70px;width:150px" onclick="cmdPlus()"> P + </button>
+	</p>
+	<p>
+	  <button id="butPart1"  style="font-size:170%;height:70px;width:300px" onclick="cmdNewGame()"> NUOVA PARTITA </button>
+	</p>
+	<p>
+      <div id="id_Description">		
+      </div>	
+	</p>
+	
+
+  </body>
+
+</html>
