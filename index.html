@@ -2,9 +2,7 @@
 
 <!-- Gioco temperatura forno, v. 0.1                             -->
 <!-- Copyright (c) IIS Cattaneo dall'Aglio, Castelnovo ne' Monti -->
-<!-- Versione con regolatore PID                                 -->
-<!-- (M.C., 18/05/2023)                                          -->
-
+<!-- (M.C., 04/05/2023)                                          -->
 
 <html>
 <head>
@@ -38,16 +36,6 @@
         var TpartInitial = 20;   /* Temperatura iniziale pezzo da scaldare */
         var PartPresent = 0;
         var GameState = 0;    /* Stato della partita in corso (0=gioco non avviato; 1=partita in corso; 2=partita finita, vinto; 3=partita finita, perso */
-
-        var Kp = 0;
-        var Ti = 0;
-        var Td = 0;
-        var E = 0;
-        var KE = 0;
-        var oldKE = 0;
-        var OUTp = 0;
-        var OUTi = 0;
-        var OUTd = 0;
 
         function componentToHex(c) {
             var hex = c.toString(16);
@@ -102,21 +90,19 @@
                 if (Timer >= Ttime) {
                     GameState = 2; // Fine patita, VINTO
                     setMessage(2);
-                    resetPID();
                 }
 
                 // Verifica raggiungimento punto di esplosione
                 if (Tpart > Texplosion) {
-                    GameState = 3; // Fine partita, PERSO
+                    GameState = 3; // Fine partita, PERSO 
                     setPartPresent(0);
                     setBoom(1);
                     setMessage(1);
-                    resetPID();
                 }
             }
 
             /* Aggiornamento campi */
-            document.getElementById("id_P").innerHTML = "" + (P / 10).toFixed(1) + " (" + (OUTp / 10).toFixed(1) + "+" + (OUTi / 10).toFixed(1) + "+" + (OUTd / 10).toFixed(1) + ")";
+            document.getElementById("id_P").innerHTML = "" + (P / 10).toFixed(1);
             //document.getElementById("id_T1").innerHTML = ""+T1.toFixed(1);
             //document.getElementById("id_T2").innerHTML = ""+T2.toFixed(1);
             //document.getElementById("id_T3").innerHTML = ""+T3.toFixed(1);
@@ -144,24 +130,6 @@
             // Colore di partenza: #999999 (153, 153, 153) / colore finale: #ff8a00 (255, 138, 0)
             var Tpart_hexCol = rgbToHex(Math.round(linScale(Tenv, Ttarget, 153, 255, Tpart)), Math.round(linScale(Tenv, Ttarget, 153, 138, Tpart)), Math.round(linScale(Tenv, Ttarget, 153, 0, Tpart)))
             document.getElementById("Pezzo1").setAttribute('style', "fill:" + Tpart_hexCol + ";stroke:none");
-
-            // PID
-            if (GameState == 1) {
-                Kp = document.getElementById("E_Kp").value;
-                Ti = document.getElementById("E_Ti").value;
-                Td = document.getElementById("E_Td").value;
-                E = Ttarget - Tpart;
-                KE = Kp * E;
-                OUTp = KE;
-                if (Ti > 0) {
-                    OUTi = OUTi + KE * 0.1 / Ti;
-                } else {
-                    OUTi = 0;
-                }
-                OUTd = Td * (KE - oldKE) / 0.1;
-                oldKE = KE;
-                P = OUTp + OUTi + OUTd;
-            }
 
         }
 
@@ -216,26 +184,9 @@
             setPartPresent(0);
         }
 
-        function resetPID() {
-            Kp = document.getElementById("E_Kp").value;
-            Ti = document.getElementById("E_Ti").value;
-            Td = document.getElementById("E_Td").value;
-            OUTp = 0;
-            OUTi = 0;
-            OUTd = 0;
-            P = 0;
-            KE = Ttarget - Tpart;
-            oldKE = KE;
-        }
-
-
         function cmdNewGame() {
             P = 0;
-            T1 = Tenv;
-            T2 = Tenv;
-            T3 = Tenv;
             Tpart = Tenv;
-            resetPID();
             Timer = 0;
             TimerTot = 0;
             setPartPresent(1);
@@ -561,13 +512,13 @@
     Potenza: <span id="id_P">.</span> kW
 </div>
 <!--
-<div>
+<div>		
   Temperatura T1: <span id="id_T1">.</span> °C
 </div>
-<div>
+<div>		
   Temperatura T2: <span id="id_T2">.</span> °C
 </div>
-<div>
+<div>		
   Temperatura T3: <span id="id_T3">.</span> °C
 </div>
 -->
@@ -581,32 +532,10 @@
     Durata partita: <span id="id_TotalTimer">.</span> s
 </div>
 </p>
-<!--
-	<p>
-	  <button id="butMinus" style="font-size:170%;height:70px;width:150px" onclick="cmdMinus()"> P - </button>
-	  <button id="butPlus"  style="font-size:170%;height:70px;width:150px" onclick="cmdPlus()"> P + </button>
-	</p>
--->
+
 <p>
-<div style="font-size:170%">
-    <table>
-        <tr>
-            <td> Kp:</td>
-            <td><input id="E_Kp" type="text" style="font-size:120%;height:50px;width:150px" value="0"/></td>
-            <td> kW/°C</td>
-        </tr>
-        <tr>
-            <td> Ti:</td>
-            <td><input id="E_Ti" type="text" style="font-size:120%;height:50px;width:150px" value="0"/></td>
-            <td> s</td>
-        </tr>
-        <tr>
-            <td> Td:</td>
-            <td><input id="E_Td" type="text" style="font-size:120%;height:50px;width:150px" value="0"/></td>
-            <td> s</td>
-        </tr>
-    </table>
-</div>
+    <button id="butMinus" style="font-size:170%;height:70px;width:150px" onclick="cmdMinus()"> P -</button>
+    <button id="butPlus" style="font-size:170%;height:70px;width:150px" onclick="cmdPlus()"> P +</button>
 </p>
 <p>
     <button id="butPart1" style="font-size:170%;height:70px;width:300px" onclick="cmdNewGame()"> NUOVA PARTITA</button>
